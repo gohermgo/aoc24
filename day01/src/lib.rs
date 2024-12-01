@@ -2,7 +2,7 @@ mod into_lists;
 pub use into_lists::IntoLists;
 use into_lists::{Lists, OccurencePair};
 
-pub mod part_1 {
+pub mod part01 {
     //! Part 1 solution
     use super::*;
     pub fn calculate_final_distance(src: impl IntoLists) -> Option<u32> {
@@ -17,7 +17,7 @@ pub mod part_1 {
             .map(Iterator::sum)
     }
 }
-pub mod part_2 {
+pub mod part02 {
     //! Part 2 solution
     use super::*;
     pub fn calculate_final_similarity_score(src: impl IntoLists) -> Option<u32> {
@@ -42,7 +42,7 @@ mod tests {
 1   3
 3   9
 3   3";
-    mod part_1 {
+    mod part01 {
         use super::*;
         #[test]
         fn each_distance_correct() {
@@ -60,11 +60,11 @@ mod tests {
         #[test]
         fn final_distance_is_correct() {
             let lines = TEST_INPUT.lines();
-            let final_distance = crate::part_1::calculate_final_distance(lines).unwrap();
+            let final_distance = crate::part01::calculate_final_distance(lines).unwrap();
             assert_eq!(final_distance, 11);
         }
     }
-    mod part_2 {
+    mod part02 {
         use super::*;
         #[test]
         fn each_similarity_score_correct() {
@@ -82,7 +82,7 @@ mod tests {
         #[test]
         fn final_similarity_score_is_correct() {
             let lines = TEST_INPUT.lines();
-            let final_score = crate::part_2::calculate_final_similarity_score(lines).unwrap();
+            let final_score = crate::part02::calculate_final_similarity_score(lines).unwrap();
             assert_eq!(final_score, 31);
         }
     }
