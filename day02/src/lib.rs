@@ -1,62 +1,155 @@
 use std::ops::Sub;
-
+fn delta<'a, R: ?Sized>(
+    row: &'a R,
+    get_first: impl Fn() -> Option<&'a R::Elt>,
+    init_counter: impl Fn() -> usize,
+    mut pre_iteration_clause: impl FnMut(&mut usize),
+) -> Option<Vec<<&'a R::Elt as Sub>::Output>>
+where
+    R: Row,
+    R::Elt: PartialOrd,
+    &'a R::Elt: Sub,
+{
+    let mut prev = get_first()?;
+    let mut index = init_counter();
+    let mut delta_buf = vec![];
+    while let Some(current) = {
+        pre_iteration_clause(&mut index);
+        let elt = row.get(index);
+        index += 1;
+        elt
+    } {
+        delta_buf.push(if current > prev {
+            current - prev
+        } else {
+            prev - current
+        });
+        prev = current;
+    }
+    Some(delta_buf)
+}
+fn check<'a, R: ?Sized>(
+    row: &'a R,
+    get_first: impl Fn() -> Option<&'a R::Elt>,
+    init_counter: impl Fn() -> usize,
+    mut pre_iteration_clause: impl FnMut(&mut usize),
+    break_condition: impl Fn(&'a R::Elt, &'a R::Elt) -> bool,
+) -> bool
+where
+    R: Row,
+{
+    let Some(mut prev) = get_first() else {
+        return false;
+    };
+    let mut index = init_counter();
+    while let Some(current) = {
+        pre_iteration_clause(&mut index);
+        let elt = row.get(index);
+        index += 1;
+        elt
+    } {
+        if break_condition(current, prev) {
+            return false;
+        }
+        prev = current;
+    }
+    true
+}
 pub trait Row {
     type Elt;
     fn is_safe(&self) -> bool;
-
+    fn is_safe_omitting(&self, index_of_omitted: usize) -> bool;
+    fn is_safe_adjusted(&self) -> bool {
+        for index in 0..self.len() {
+            if self.is_safe_omitting(index) {
+                return true;
+            }
+        }
+        return false;
+    }
+    fn len(&self) -> usize;
     fn get(&self, index: usize) -> Option<&Self::Elt>;
     fn all_increasing(&self) -> bool
     where
         Self::Elt: PartialOrd,
     {
-        let Some(mut prev) = self.get(0) else {
-            return false;
-        };
-        let mut index = 1;
-        while let Some(current) = self.get(index) {
-            if current <= prev {
-                return false;
-            };
-            index += 1;
-            prev = current;
-        }
-        true
+        check(
+            self,
+            || self.get(0),
+            || 1,
+            |_| {},
+            |current, prev| current <= prev,
+        )
+    }
+    fn all_increasing_omitting(&self, index_of_omitted: usize) -> bool
+    where
+        Self::Elt: PartialOrd,
+    {
+        check(
+            self,
+            || self.get(if index_of_omitted == 0 { 1 } else { 0 }),
+            || if index_of_omitted == 0 { 2 } else { 1 },
+            |index| {
+                if index == &index_of_omitted {
+                    *index = *index + 1;
+                }
+            },
+            |current, prev| current <= prev,
+        )
     }
     fn all_decreasing(&self) -> bool
     where
         Self::Elt: PartialOrd,
     {
-        let Some(mut prev) = self.get(0) else {
-            return false;
-        };
-        let mut index = 1;
-        while let Some(current) = self.get(index) {
-            if current >= prev {
-                return false;
-            };
-            index += 1;
-            prev = current;
-        }
-        true
+        check(
+            self,
+            || self.get(0),
+            || 1,
+            |_| {},
+            |current, prev| current >= prev,
+        )
+    }
+    fn all_decreasing_omitting(&self, index_of_omitted: usize) -> bool
+    where
+        Self::Elt: PartialOrd,
+    {
+        check(
+            self,
+            || self.get(if index_of_omitted == 0 { 1 } else { 0 }),
+            || if index_of_omitted == 0 { 2 } else { 1 },
+            |index| {
+                if index == &index_of_omitted {
+                    *index = *index + 1;
+                }
+            },
+            |current, prev| current >= prev,
+        )
     }
     fn delta_list(&self) -> Option<Vec<<&Self::Elt as Sub>::Output>>
     where
         Self::Elt: PartialOrd,
         for<'a> &'a Self::Elt: Sub,
     {
-        let mut prev = self.get(0)?;
-        let mut index = 1;
-        let mut delta_buf = vec![];
-        while let Some(current) = self.get(index) {
-            delta_buf.push(if current > prev {
-                current - prev
-            } else {
-                prev - current
-            });
-            index += 1;
-            prev = current;
-        }
-        Some(delta_buf)
+        delta(self, || self.get(0), || 1, |_| {})
+    }
+    fn delta_list_omitting(
+        &self,
+        index_of_omitted: usize,
+    ) -> Option<Vec<<&Self::Elt as Sub>::Output>>
+    where
+        Self::Elt: PartialOrd,
+        for<'a> &'a Self::Elt: Sub,
+    {
+        delta(
+            self,
+            || self.get(if index_of_omitted == 0 { 1 } else { 0 }),
+            || if index_of_omitted == 0 { 2 } else { 1 },
+            |index| {
+                if index == &index_of_omitted {
+                    *index = *index + 1;
+                }
+            },
+        )
     }
 }
 
@@ -78,38 +171,12 @@ pub trait IntoRows {
         }
         self.into_rows().map(|rows| sort_rows::<Self>(rows))
     }
-    // fn into_distances(self) -> Option<impl Iterator<Item = u32>>
-    // where
-    //     Self: Sized,
-    // {
-    //     fn fold_lists_into_distances((a_nums, b_nums): Lists) -> impl Iterator<Item = u32> {
-    //         assert!(a_nums.is_sorted());
-    //         assert!(b_nums.is_sorted());
-    //         a_nums.into_iter().zip(b_nums).map(|(a, b)| a.abs_diff(b))
-    //     }
-    //     self.into_sorted_rows().map(fold_lists_into_distances)
-    // }
-    // fn into_occurences(self) -> Option<impl IntoIterator<Item = OccurencePair>>
-    // where
-    //     Self: Sized,
-    // {
-    //     fn fold_lists_into_similarity_scores((a_nums, b_nums): Lists) -> Vec<OccurencePair> {
-    //         let mut scores = Vec::new();
-    //         for k in a_nums {
-    //             let v =
-    //                 b_nums.iter().fold(
-    //                     Default::default(),
-    //                     |acc: u32, elt| if k.eq(elt) { acc + 1 } else { acc },
-    //                 );
-    //             scores.push((k, v));
-    //         }
-    //         scores
-    //     }
-    //     self.into_rows().map(fold_lists_into_similarity_scores)
-    // }
 }
 impl Row for Vec<u32> {
     type Elt = u32;
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
     fn get(&self, index: usize) -> Option<&Self::Elt> {
         self.as_slice().get(index)
     }
@@ -119,6 +186,17 @@ impl Row for Vec<u32> {
             return false;
         }
         let Some(deltas) = self.delta_list() else {
+            return false;
+        };
+        deltas.into_iter().all(|value| (1..=3).contains(&value))
+    }
+    fn is_safe_omitting(&self, index_of_omitted: usize) -> bool {
+        if !(self.all_increasing_omitting(index_of_omitted)
+            || self.all_decreasing_omitting(index_of_omitted))
+        {
+            return false;
+        }
+        let Some(deltas) = self.delta_list_omitting(index_of_omitted) else {
             return false;
         };
         deltas.into_iter().all(|value| (1..=3).contains(&value))
@@ -145,6 +223,15 @@ where
         let mut count = 0;
         for row in self.value.iter() {
             if row.is_safe() {
+                count += 1;
+            }
+        }
+        count
+    }
+    fn safe_adjusted_report_count(&self) -> usize {
+        let mut count = 0;
+        for row in self.value.iter() {
+            if row.is_safe_adjusted() {
                 count += 1;
             }
         }
@@ -185,9 +272,6 @@ fn into_rows_works() {
 }
 pub mod part01 {
     //! Part 1 solution
-}
-pub mod part02 {
-    //! Part 2 solution
 
     use crate::IntoRows;
     pub fn calculate_safe_report_count(input: impl IntoRows) -> usize {
@@ -195,6 +279,16 @@ pub mod part02 {
             return 0;
         };
         rows.safe_report_count()
+    }
+}
+pub mod part02 {
+    //! Part 2 solution
+    use crate::IntoRows;
+    pub fn calculate_safe_adjusted_report_count(input: impl IntoRows) -> usize {
+        let Some(rows) = input.into_rows() else {
+            return 0;
+        };
+        rows.safe_adjusted_report_count()
     }
 }
 #[cfg(test)]
@@ -239,5 +333,34 @@ mod tests {
     }
     mod part02 {
         use super::*;
+
+        #[test]
+        fn each_safety_correct() {
+            let lines = TEST_INPUT.lines();
+            let rows = lines.into_rows().unwrap();
+            let mut rows_iter = rows.into_iter();
+            // Row 1 safe
+            assert!(rows_iter.next().unwrap().is_safe());
+            // Row 2 unsafe
+            assert!(!rows_iter.next().unwrap().is_safe());
+            // Row 3 unsafe
+            assert!(!rows_iter.next().unwrap().is_safe());
+            // Row 4 Safe
+            assert!(rows_iter.next().unwrap().is_safe_omitting(1));
+            // Row 5 Safe
+            assert!(rows_iter.next().unwrap().is_safe_adjusted());
+            // Row 6 Safe
+            assert!(rows_iter.next().unwrap().is_safe());
+
+            assert!(rows_iter.next().is_none())
+        }
+
+        #[test]
+        fn final_count_correct() {
+            let lines = TEST_INPUT.lines();
+            let rows = lines.into_rows().unwrap();
+            let count = rows.safe_adjusted_report_count();
+            assert_eq!(count, 4)
+        }
     }
 }
